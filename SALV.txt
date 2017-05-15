@@ -1,0 +1,562 @@
+***********************************************************************
+* Objetivo : Relatório de Apolices
+* Reltorio Utilizando a classe SALV
+* Analista Técnico : Evandro Ferreira 
+*----------------------------------------------------------------------*
+REPORT  zfir0105.
+
+TABLES: zfitb0091, zfitb0102, zfitb0087, zfist041, zfitb0099.
+
+*----------------------------------------------------------------------*
+* Tipos
+*----------------------------------------------------------------------*
+TYPES: BEGIN OF yg_line,
+         tdline(72) TYPE c,
+       END OF yg_line.
+
+TYPES: ytg_zfitb0091 TYPE HASHED TABLE OF zfitb0091
+                     WITH UNIQUE KEY id_contrato bukrs gjahr,
+       ytg_zfitb0099 TYPE TABLE OF zfitb0099,
+       ytg_output    TYPE TABLE OF zfist041,
+       ytg_line      TYPE TABLE OF yg_line.
+
+*----------------------------------------------------------------------*
+* Tabelas
+*----------------------------------------------------------------------*
+DATA: tg_zfitb0091   TYPE ytg_zfitb0091,
+      tg_zfitb0099   TYPE ytg_zfitb0099,
+      tg_output      TYPE ytg_output.
+
+*---------------------------------------------------------------------*
+*       CLASS lcl_handle_events DEFINITION
+*---------------------------------------------------------------------*
+* §5.1 define a local class for handling events of cl_salv_table
+*---------------------------------------------------------------------*
+CLASS lcl_handle_events DEFINITION.
+  PUBLIC SECTION.
+    METHODS:
+      on_link_click FOR EVENT link_click OF cl_salv_events_table
+        IMPORTING row column.
+ENDCLASS.                    "lcl_handle_events DEFINITION
+*---------------------------------------------------------------------*
+*       CLASS lcl_handle_events IMPLEMENTATION
+*---------------------------------------------------------------------*
+CLASS lcl_handle_events IMPLEMENTATION.
+  METHOD on_link_click.
+    PERFORM f_hotspot_click USING row column.
+  ENDMETHOD.                    "on_single_click
+ENDCLASS.                    "lcl_handle_events IMPLEMENTATION
+
+DATA: go_salv   TYPE REF TO cl_salv_table,
+      go_events TYPE REF TO lcl_handle_events.
+
+*----------------------------------------------------------------------*
+* SELECTION-SCREEN
+*----------------------------------------------------------------------*
+SELECTION-SCREEN BEGIN OF BLOCK a2 WITH FRAME TITLE text-001.
+SELECT-OPTIONS: s_seguro  FOR zfitb0091-tp_seguro,                  "Tipo de Seguro
+                s_modali  FOR zfitb0091-tp_modalidade,              "modalidade
+                s_contra  FOR zfitb0091-id_contrato MATCHCODE OBJECT zafi0004,"Cotação
+                s_apolic  FOR zfitb0091-num_apolice MATCHCODE OBJECT zafi0005,"Numero da Apolice
+                s_bukrs   FOR zfitb0091-bukrs,                      "Empresa
+                s_gjahr   FOR zfitb0091-gjahr,                      "Ano
+                s_criac   FOR zfitb0091-data_criacao,               "data da criação
+                s_uname   FOR zfitb0091-criado_por,                 "Usuário que Criou
+                s_status  FOR zfitb0091-status,                     "status
+                s_resp    FOR zfitb0091-resp_area,                  "Responsável
+                s_inicio  FOR zfitb0091-data_inicio,                "data inicio
+                s_final   FOR zfitb0091-data_final,                 "data final
+                s_pag     FOR zfitb0091-data_pag,                   "data pagamento
+                s_dias    FOR zfist041-dias_vencimento,             "dias para vencimento
+                s_dtapol  FOR zfitb0091-data_apolice,               "data da apolice
+                s_partne  FOR zfitb0099-partner MATCHCODE OBJECT zafi0012,"Parceiro
+                s_tpdoc   FOR zfitb0091-tp_documento.
+
+SELECTION-SCREEN END OF BLOCK a2.
+
+
+SELECTION-SCREEN BEGIN OF BLOCK a3 WITH FRAME TITLE text-021.
+PARAMETERS: p_layout LIKE disvariant-variant.
+SELECTION-SCREEN END OF BLOCK a3.
+
+*----------------------------------------------------------------------*
+* AT SELECTION-SCREEN ON VALUE-REQUEST                                 *
+*----------------------------------------------------------------------*
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_layout.
+  PERFORM f_f4_layouts CHANGING p_layout.
+
+*----------------------------------------------------------------------*
+*START-OF-SELECTION.
+*----------------------------------------------------------------------*
+START-OF-SELECTION.
+*-- Busca dados para processamento
+  PERFORM f_get_dados CHANGING tg_zfitb0091
+                               tg_zfitb0099.
+  CHECK tg_zfitb0091 IS NOT INITIAL.
+
+*--Processa dados
+  PERFORM f_load_dados USING tg_zfitb0091
+                             tg_zfitb0099
+                       CHANGING tg_output.
+
+*-- Exibe ALV
+  PERFORM f_exibe_dados USING tg_output.
+
+*&---------------------------------------------------------------------*
+*&      Form  F_GET_DADOS
+*&---------------------------------------------------------------------*
+*       Busca dados para processamento
+*----------------------------------------------------------------------*
+FORM f_get_dados CHANGING p_tzfitb0091 TYPE ytg_zfitb0091
+                          p_tzfitb0099 TYPE ytg_zfitb0099.
+
+*-- Contratos Dados Básicos
+  SELECT * FROM zfitb0091
+    INTO TABLE p_tzfitb0091
+     WHERE tp_seguro     IN s_seguro
+       AND tp_modalidade IN s_modali
+       AND id_contrato   IN s_contra
+       AND num_apolice   IN s_apolic
+       AND bukrs         IN s_bukrs
+       AND gjahr         IN s_gjahr
+       AND data_criacao  IN s_criac
+       AND criado_por    IN s_uname
+       AND resp_area     IN s_resp
+       AND status        IN s_status
+       AND data_inicio   IN s_inicio
+       AND data_final    IN s_final
+       AND data_pag      IN s_pag
+       AND data_apolice  IN s_dtapol
+       AND tp_documento  IN s_tpdoc.
+
+  IF sy-subrc EQ 0.
+* Parceiro de Negócio
+    SELECT * FROM zfitb0099
+     INTO TABLE p_tzfitb0099
+      FOR ALL ENTRIES IN p_tzfitb0091
+      WHERE id_contrato EQ p_tzfitb0091-id_contrato
+        AND partner     IN s_partne[]
+        AND bukrs       EQ p_tzfitb0091-bukrs
+        AND gjahr       EQ p_tzfitb0091-gjahr
+        AND principal   EQ abap_true.
+  ELSE.
+    MESSAGE text-003 TYPE 'S' DISPLAY LIKE 'E'.
+  ENDIF.
+ENDFORM.                    " F_GET_DADOS
+*&---------------------------------------------------------------------*
+*&      Form  F_LOAD_DADOS
+*&---------------------------------------------------------------------*
+*       Processa dados
+*----------------------------------------------------------------------*
+FORM f_load_dados  USING    p_tzfitb0091 TYPE ytg_zfitb0091
+                            p_tzfitb0099 TYPE ytg_zfitb0099
+                   CHANGING p_toutput    TYPE ytg_output.
+*----------------------------------------------------------------------*
+* Estruturas
+*----------------------------------------------------------------------*
+  DATA el_output TYPE zfist041.
+
+*----------------------------------------------------------------------*
+* FIELD-SYMBOLS
+*----------------------------------------------------------------------*
+  FIELD-SYMBOLS: <fl_tzfitb0091> TYPE zfitb0091,
+                 <fl_tzfitb0099> TYPE zfitb0099.
+
+  SORT p_tzfitb0099 BY id_contrato bukrs gjahr.
+
+  LOOP AT p_tzfitb0091 ASSIGNING <fl_tzfitb0091>.
+    CLEAR el_output.
+    MOVE-CORRESPONDING <fl_tzfitb0091> TO el_output.
+
+*-- dias para o vencimento
+    el_output-dias_vencimento = el_output-data_final - sy-datum.
+    IF el_output-dias_vencimento < 0.
+      el_output-dias_vencimento = 0.
+    ENDIF.
+
+    IF el_output-dias_vencimento NOT IN s_dias[].
+      CONTINUE.
+    ENDIF.
+
+*-- Busca o parceiro
+    READ TABLE p_tzfitb0099 ASSIGNING <fl_tzfitb0099>
+                            WITH KEY id_contrato = <fl_tzfitb0091>-id_contrato
+                                     bukrs       = <fl_tzfitb0091>-bukrs
+                                     gjahr       = <fl_tzfitb0091>-gjahr
+                            BINARY SEARCH.
+    IF sy-subrc EQ 0.
+      el_output-partner  = <fl_tzfitb0099>-partner.
+
+*-- Nome do BP.
+      PERFORM f_get_name_bp USING el_output-partner
+                            CHANGING  el_output-name_first.
+    ELSEIF s_partne[] IS NOT INITIAL.
+      CONTINUE.
+    ENDIF.
+
+*-- Busca descrição da modalidade
+    PERFORM f_get_desc_modalidade USING el_output-tp_modalidade
+                                  CHANGING el_output-desc_modalidade.
+
+*-- Busca Descrição do seguro
+    PERFORM f_get_dec_seguro USING el_output-tp_seguro
+                             CHANGING el_output-desc_seguro.
+
+    PERFORM f_get_desc_satus USING el_output-status
+                             CHANGING el_output-desc_status.
+
+*-- Nome da empresa
+    PERFORM f_get_butxt USING el_output-bukrs
+                        CHANGING el_output-butxt.
+
+*-- Nome usuário
+    PERFORM f_get_name_user USING el_output-resp_area
+                            CHANGING el_output-name_resp.
+
+*-- Nome usuário
+    PERFORM f_get_name_user USING el_output-criado_por
+                            CHANGING el_output-name_criador.
+
+    IF <fl_tzfitb0091>-metodo_calc NE '1'.
+      IF <fl_tzfitb0091>-tp_documento EQ 2 AND
+         <fl_tzfitb0091>-receber EQ abap_true.
+        el_output-vlr_risco = el_output-vlr_risco * -1.
+      ENDIF.
+    ELSE.
+      CLEAR el_output-vlr_risco.
+    ENDIF.
+
+    APPEND el_output TO p_toutput.
+  ENDLOOP.
+
+ENDFORM.                    " F_LOAD_DADOS
+*&---------------------------------------------------------------------*
+*&      Form  F_EXIBE_DADOS
+*&---------------------------------------------------------------------*
+*       Exive ALV
+*----------------------------------------------------------------------*
+FORM f_exibe_dados  USING  p_toutput TYPE ytg_output.
+
+  DATA: ol_functions TYPE REF TO cl_salv_functions_list,
+        ol_columns   TYPE REF TO cl_salv_columns_table,
+        ol_column    TYPE REF TO cl_salv_column_table,
+        ol_events    TYPE REF TO cl_salv_events_table,
+        ol_layout    TYPE REF TO cl_salv_layout.
+
+  DATA: el_key       TYPE salv_s_layout_key.
+
+  DATA: vl_restrict  TYPE salv_de_layout_restriction.
+
+  TRY.
+      cl_salv_table=>factory(
+       EXPORTING
+          list_display = abap_true
+        IMPORTING
+          r_salv_table = go_salv
+        CHANGING
+          t_table      = p_toutput ).
+    CATCH cx_salv_msg.
+  ENDTRY.
+
+  ol_events = go_salv->get_event( ).
+  CREATE OBJECT go_events.
+  SET HANDLER go_events->on_link_click FOR ol_events.
+
+  ol_functions = go_salv->get_functions( ).
+  ol_functions->set_all( abap_true ).
+
+  ol_columns = go_salv->get_columns( ).
+  ol_columns->set_optimize( abap_true ).
+
+  PERFORM f_set_columns USING ol_columns.
+
+  ol_layout = go_salv->get_layout( ).
+  el_key-report = sy-repid.
+  ol_layout->set_key( el_key ).
+  vl_restrict = if_salv_c_layout=>restrict_user_dependant.
+  ol_layout->set_save_restriction( vl_restrict ).
+
+  IF p_layout IS NOT INITIAL.
+    ol_layout->set_initial_layout( p_layout ).
+  ENDIF.
+
+  go_salv->display( ).
+ENDFORM.                    " F_EXIBE_DADOS
+*&---------------------------------------------------------------------*
+*&      Form  F_GET_DESC_MODALIDADE
+*&---------------------------------------------------------------------*
+*       Busca Descrição da Modalidade
+*----------------------------------------------------------------------*
+FORM f_get_desc_modalidade  USING    p_tp_modalidade   TYPE zfitb0087-tp_modalidade
+                            CHANGING p_desc_modalidade TYPE zfitb0087-desc_modalidade.
+
+  IF p_tp_modalidade IS NOT INITIAL.
+*-- Tipos de Modalidades
+    SELECT SINGLE desc_modalidade "Descrição da Modalidade
+      FROM zfitb0087
+       INTO p_desc_modalidade
+        WHERE tp_modalidade EQ p_tp_modalidade.
+  ENDIF.
+ENDFORM.                    " F_GET_DESC_MODALIDADE
+*&---------------------------------------------------------------------*
+*&      Form  F_GET_DEC_SEGURO
+*&---------------------------------------------------------------------*
+*       Descrição do seguro
+*----------------------------------------------------------------------*
+FORM f_get_dec_seguro  USING    p_tp_seguro   TYPE zfitb0086-tp_seguro
+                       CHANGING p_desc_seguro TYPE zfitb0086-desc_seguro.
+
+*-- Descrição do tipo de Seguro
+  IF NOT p_tp_seguro IS INITIAL.
+    SELECT SINGLE desc_seguro
+     FROM zfitb0086
+      INTO p_desc_seguro
+       WHERE tp_seguro EQ p_tp_seguro.
+  ENDIF.
+ENDFORM.                    " F_GET_DEC_SEGURO
+*&---------------------------------------------------------------------*
+*&      Form  F_GET_DESC_SATUS
+*&---------------------------------------------------------------------*
+FORM f_get_desc_satus  USING    p_status       TYPE zfist021-status
+                       CHANGING p_desc_status  TYPE zfist021-desc_status.
+  SELECT SINGLE ddtext      "Texto breve para valores fixos
+    FROM dd07t INTO p_desc_status
+     WHERE domname    EQ 'ZDSTATUS_CONTRATO'
+       AND domvalue_l EQ p_status
+       AND ddlanguage EQ sy-langu.
+ENDFORM.                    " F_GET_DESC_SATUS
+*&---------------------------------------------------------------------*
+*&      Form  F_HOTSPOT_CLICK
+*&---------------------------------------------------------------------*
+FORM f_hotspot_click  USING p_row     TYPE i
+                            p_column  TYPE lvc_fname.
+
+************************************************************************
+* Estruturas
+************************************************************************
+  DATA: el_output  TYPE zfist041.
+
+  READ TABLE tg_output INTO el_output INDEX p_row.
+  IF p_column EQ 'ID_CONTRATO'.
+    IF el_output-id_contrato IS NOT INITIAL.
+      SET PARAMETER ID 'ZIDCONT' FIELD el_output-id_contrato.
+      CALL TRANSACTION 'ZFI0521' AND SKIP FIRST SCREEN.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.                    " F_HOTSPOT_CLICK
+*&---------------------------------------------------------------------*
+*&      Form  F_SET_COLUMNS
+*&---------------------------------------------------------------------*
+FORM f_set_columns  USING p_columns TYPE REF TO cl_salv_columns_table.
+
+  DATA: ol_column TYPE REF TO cl_salv_column_table,
+        lo_aggrs  TYPE REF TO cl_salv_aggregations,
+        lo_sorts  TYPE REF TO cl_salv_sorts.
+
+  TRY.
+      ol_column ?= p_columns->get_column( 'STATUS' ).
+      ol_column->set_visible( if_salv_c_bool_sap=>false ).
+      ol_column ?= p_columns->get_column( 'TP_SEGURO' ).
+      ol_column->set_visible( if_salv_c_bool_sap=>false ).
+      ol_column ?= p_columns->get_column( 'TP_MODALIDADE' ).
+      ol_column->set_visible( if_salv_c_bool_sap=>false ).
+      ol_column ?= p_columns->get_column( 'RESP_AREA' ).
+      ol_column->set_visible( if_salv_c_bool_sap=>false ).
+      ol_column ?= p_columns->get_column( 'CRIADO_POR' ).
+      ol_column->set_visible( if_salv_c_bool_sap=>false ).
+      ol_column ?= p_columns->get_column( 'ID_CONTRATO' ).
+      ol_column->set_cell_type( if_salv_c_cell_type=>hotspot ).
+      ol_column ?= p_columns->get_column( 'VLR_RISCO' ).
+      ol_column->set_sign( if_salv_c_bool_sap=>true ).
+
+
+      PERFORM f_column_text USING 'VLR_PREMIO_BRUTO'
+                                   text-012
+                                   p_columns
+                            CHANGING ol_column.
+
+      PERFORM f_column_text USING 'VLR_PREMIO'
+                                   text-013
+                                   p_columns
+                            CHANGING ol_column.
+
+      PERFORM f_column_text USING 'DESC_STATUS'
+                                   text-014
+                                   p_columns
+                            CHANGING ol_column.
+
+      PERFORM f_column_text USING 'NAME_RESP'
+                                   text-015
+                                   p_columns
+                            CHANGING ol_column.
+
+      PERFORM f_column_text USING 'NAME_CRIADOR'
+                                   text-016
+                                   p_columns
+                            CHANGING ol_column.
+
+      PERFORM f_column_text USING 'DATA_CRIACAO'
+                                   text-017
+                                   p_columns
+                            CHANGING ol_column.
+
+      PERFORM f_column_text USING 'DESC_SEGURO'
+                                    text-018
+                                    p_columns
+                             CHANGING ol_column.
+
+      PERFORM f_column_text USING 'DESC_MODALIDADE'
+                                    text-019
+                                    p_columns
+                             CHANGING ol_column.
+
+      PERFORM f_column_text USING 'DIAS_VENCIMENTO'
+                                    text-020
+                                    p_columns
+                             CHANGING ol_column.
+
+      PERFORM f_column_text USING 'BUTXT'
+                                   text-022
+                                   p_columns
+                             CHANGING ol_column.
+
+      PERFORM f_column_text USING 'NAME_FIRST'
+                                   text-023
+                                   p_columns
+                             CHANGING ol_column.
+
+      PERFORM f_column_text USING 'DATA_APOLICE'
+                                    text-026
+                                    p_columns
+                              CHANGING ol_column.
+
+      PERFORM f_column_text USING 'DATA_CRIACAO'
+                                    text-027
+                                    p_columns
+                              CHANGING ol_column.
+
+    CATCH cx_salv_not_found.
+  ENDTRY.
+
+  lo_aggrs = go_salv->get_aggregations( ).
+  CALL METHOD lo_aggrs->add_aggregation
+    EXPORTING
+      columnname  = 'VLR_PREMIO'
+      aggregation = if_salv_c_aggregation=>total.
+
+  CALL METHOD lo_aggrs->add_aggregation
+    EXPORTING
+      columnname  = 'VLR_IMPOSTO'
+      aggregation = if_salv_c_aggregation=>total.
+
+  CALL METHOD lo_aggrs->add_aggregation
+    EXPORTING
+      columnname  = 'VLR_PREMIO_BRUTO'
+      aggregation = if_salv_c_aggregation=>total.
+
+  CALL METHOD lo_aggrs->add_aggregation
+    EXPORTING
+      columnname  = 'VLR_RISCO'
+      aggregation = if_salv_c_aggregation=>total.
+
+  lo_sorts = go_salv->get_sorts( ).
+  lo_sorts->clear( ).
+
+  lo_sorts->add_sort(
+  columnname = 'BUKRS'
+  position   = 1
+  subtotal   = abap_true
+  sequence   = if_salv_c_sort=>sort_up ).
+
+  lo_sorts->add_sort(
+  columnname = 'DESC_SEGURO'
+  subtotal   = abap_true
+  sequence   = if_salv_c_sort=>sort_up ).
+
+ENDFORM.                    " F_SET_COLUMNS
+*&---------------------------------------------------------------------*
+*&      Form  F_COLUMN_TEXT
+*&---------------------------------------------------------------------*
+FORM f_column_text  USING    value(p_field)
+                             value(p_text)
+                             p_columns TYPE REF TO cl_salv_columns_table
+                    CHANGING p_column  TYPE REF TO cl_salv_column_table.
+
+  DATA: vl_long_text   TYPE scrtext_l,
+        vl_medium_text TYPE scrtext_m,
+        vl_short_text  TYPE scrtext_s.
+
+  vl_long_text   = p_text.
+  vl_medium_text = p_text.
+  vl_short_text  = p_text.
+  p_column ?= p_columns->get_column( p_field ).
+  p_column->set_long_text( vl_long_text ).
+  p_column->set_medium_text( vl_medium_text ).
+  p_column->set_short_text( vl_short_text ).
+ENDFORM.                    " F_COLUMN_TEXT
+*&---------------------------------------------------------------------*
+*&      Form  F_GET_NAME_BP
+*&---------------------------------------------------------------------*
+*       Nome do BP
+*----------------------------------------------------------------------*
+FORM f_get_name_bp  USING    p_partner    TYPE zfist027-partner
+                    CHANGING p_name_first TYPE zfist027-name_first.
+  SELECT SINGLE name_org1
+   FROM but000
+    INTO p_name_first
+     WHERE partner EQ p_partner.
+  IF p_name_first IS INITIAL.
+    SELECT SINGLE name_first
+     FROM but000
+      INTO p_name_first
+       WHERE partner EQ p_partner.
+  ENDIF.
+ENDFORM.                    " F_GET_NAME_BP
+*&---------------------------------------------------------------------*
+*&      Form  F_GET_BUTXT
+*&---------------------------------------------------------------------*
+*       Busca Descrição da empresa
+*----------------------------------------------------------------------*
+FORM f_get_butxt USING    p_bukrs TYPE t001-bukrs
+                 CHANGING p_butxt TYPE t001-butxt.
+*-- Busca descrição da empresa
+  IF p_bukrs IS NOT INITIAL.
+    SELECT SINGLE butxt "Denominação da firma ou empresa
+     INTO p_butxt
+      FROM t001
+       WHERE bukrs EQ p_bukrs.
+    IF sy-subrc NE 0.
+      SELECT SINGLE butxt "Denominação da firma ou empresa
+       INTO p_butxt
+        FROM zfitb0090
+         WHERE bukrs EQ p_bukrs.
+      IF sy-subrc NE 0.
+        MESSAGE text-058 TYPE 'E'.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+ENDFORM.                    " F_CHECK_BURKS_0200
+*&---------------------------------------------------------------------*
+*&      Form  GET_NAME_user
+*&---------------------------------------------------------------------*
+FORM f_get_name_user USING    p_user      TYPE zfist022-resp_area
+                     CHANGING p_name_text TYPE zfist022-name_text.
+  CLEAR p_name_text.
+  SELECT SINGLE name_textc
+   FROM user_addr
+    INTO p_name_text
+     WHERE bname EQ  p_user.
+ENDFORM.                    " GET_NAME_RESP_AREA
+*&---------------------------------------------------------------------*
+*&      Form  f4_layouts
+*&---------------------------------------------------------------------*
+FORM f_f4_layouts CHANGING c_layout TYPE disvariant-variant.
+  DATA: ls_layout TYPE salv_s_layout_info,
+        ls_key    TYPE salv_s_layout_key.
+
+  ls_key-report = sy-repid.
+
+  ls_layout = cl_salv_layout_service=>f4_layouts( s_key = ls_key ).
+  c_layout = ls_layout-layout.
+ENDFORM.                    " f4_layouts
