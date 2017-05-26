@@ -1,0 +1,244 @@
+*&---------------------------------------------------------------------*
+*& Report  Z_SALV_SIMPLE
+*&
+*&---------------------------------------------------------------------*
+*& Evandro dos Santos Ferreira
+*& Model of how to use the cl_salv_table to create a ALV
+*&---------------------------------------------------------------------*
+REPORT z_salv_simple.
+
+*----------------------------------------------------------------------*
+* TYPES
+*----------------------------------------------------------------------*
+TYPES: BEGIN OF yt_register,
+         name        TYPE string,
+         age         TYPE i,
+         nationality TYPE string,
+         sex         TYPE char1,
+         marital     TYPE char15,
+         address     TYPE string,
+         budget      TYPE i,
+       END OF yt_register.
+
+
+TYPES: ty_register TYPE STANDARD TABLE OF yt_register.
+
+*----------------------------------------------------------------------*
+* Internal Tables
+*----------------------------------------------------------------------*
+DATA: it_register  TYPE ty_register.
+
+*----------------------------------------------------------------------*
+* Class
+*----------------------------------------------------------------------*
+DATA: go_salv      TYPE REF TO cl_salv_table.
+
+START-OF-SELECTION.
+  PERFORM f_load_data CHANGING it_register.
+  PERFORM f_show_data USING it_register.
+
+*&---------------------------------------------------------------------*
+*&      Form  F_LOAD_DATA
+*&---------------------------------------------------------------------*
+FORM f_load_data CHANGING p_tregister TYPE ty_register.
+
+*----------------------------------------------------------------------*
+* Work Area
+*----------------------------------------------------------------------*
+  DATA: ls_register TYPE yt_register.
+
+  DO 30 TIMES.
+
+    PERFORM z_random_string USING 50
+                            CHANGING ls_register-name.
+
+    PERFORM z_random_int USING 90
+                         CHANGING ls_register-age.
+
+    PERFORM z_random_string USING 10
+                            CHANGING ls_register-nationality.
+
+    PERFORM z_random_string USING 70
+                        CHANGING ls_register-address.
+
+    PERFORM z_random_int USING 999999
+                         CHANGING ls_register-budget.
+
+    IF ( ls_register-age MOD 2 ) EQ 0.
+      ls_register-sex     =  'Male'.
+      ls_register-marital =  'Single'.
+    ELSE.
+      ls_register-sex     = 'Female'.
+      ls_register-marital = 'Married'.
+    ENDIF.
+
+    APPEND ls_register TO p_tregister.
+  ENDDO.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  Z_RANDOM_INT
+*&---------------------------------------------------------------------*
+FORM z_random_int  USING    p_len  TYPE qf00-ran_int
+                   CHANGING p_ran  TYPE qf00-ran_int.
+
+  CALL FUNCTION 'QF05_RANDOM_INTEGER'
+    EXPORTING
+      ran_int_max   = p_len
+      ran_int_min   = 1
+    IMPORTING
+      ran_int       = p_ran
+    EXCEPTIONS
+      invalid_input = 1
+      OTHERS        = 2.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  Z_RANDOM_STRING
+*&---------------------------------------------------------------------*
+FORM z_random_string  USING    p_len    TYPE i
+                      CHANGING p_string TYPE string.
+
+  CALL FUNCTION 'GENERAL_GET_RANDOM_STRING'
+    EXPORTING
+      number_chars  = p_len
+    IMPORTING
+      random_string = p_string.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F_SHOW_DATA
+*&---------------------------------------------------------------------*
+FORM f_show_data USING p_tregister TYPE ty_register.
+
+*----------------------------------------------------------------------*
+* Class
+*----------------------------------------------------------------------*
+  DATA: ol_functions TYPE REF TO cl_salv_functions_list,
+        ol_columns   TYPE REF TO cl_salv_columns_table,
+        ol_column    TYPE REF TO cl_salv_column_table,
+        ol_layout    TYPE REF TO cl_salv_layout.
+
+*----------------------------------------------------------------------*
+* Work Area
+*----------------------------------------------------------------------*
+  DATA: ls_key       TYPE salv_s_layout_key.
+
+*----------------------------------------------------------------------*
+* Variable
+*----------------------------------------------------------------------*
+  DATA: lv_restrict TYPE salv_de_layout_restriction.
+
+  TRY.
+      cl_salv_table=>factory(
+       EXPORTING
+          list_display = abap_true
+        IMPORTING
+          r_salv_table = go_salv
+        CHANGING
+          t_table      = p_tregister ).
+    CATCH cx_salv_msg.
+  ENDTRY.
+
+  ol_functions = go_salv->get_functions( ).
+  ol_functions->set_all( abap_true ).
+
+  ol_columns = go_salv->get_columns( ).
+  ol_columns->set_optimize( abap_true ).
+
+  PERFORM f_set_columns USING ol_columns.
+
+  ol_layout = go_salv->get_layout( ).
+  ls_key-report = sy-repid.
+  ol_layout->set_key( ls_key ).
+  lv_restrict = if_salv_c_layout=>restrict_user_dependant.
+  ol_layout->set_save_restriction( lv_restrict ).
+
+  go_salv->display( ).
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F_SET_COLUMNS
+*&---------------------------------------------------------------------*
+FORM f_set_columns  USING p_columns TYPE REF TO cl_salv_columns_table.
+
+*----------------------------------------------------------------------*
+* Class
+*----------------------------------------------------------------------*
+  DATA: ol_column TYPE REF TO cl_salv_column_table,
+        ol_aggrs  TYPE REF TO cl_salv_aggregations,
+        ol_sorts  TYPE REF TO cl_salv_sorts.
+
+  PERFORM f_column_text USING 'NAME'         'Name'         p_columns 1 CHANGING ol_column.
+  PERFORM f_column_text USING 'AGE'          'Age'          p_columns 1 CHANGING ol_column.
+  PERFORM f_column_text USING 'NATIONALITY'  'Nationality'  p_columns 1 CHANGING ol_column.
+  PERFORM f_column_text USING 'SEX'          'Sex'          p_columns 1 CHANGING ol_column.
+  PERFORM f_column_text USING 'MARITAL'      'Marital'      p_columns 2 CHANGING ol_column.
+  PERFORM f_column_text USING 'ADDRESS'      'Address'      p_columns 2 CHANGING ol_column.
+  PERFORM f_column_text USING 'BUDGET'       'Budget'       p_columns 3 CHANGING ol_column.
+
+  ol_aggrs = go_salv->get_aggregations( ).
+  CALL METHOD ol_aggrs->add_aggregation
+    EXPORTING
+      columnname  = 'BUDGET'
+      aggregation = if_salv_c_aggregation=>total.
+
+  ol_sorts = go_salv->get_sorts( ).
+  ol_sorts->clear( ).
+
+  ol_sorts->add_sort(
+  columnname = 'SEX'
+  position   = 1
+  subtotal   = abap_true
+  sequence   = if_salv_c_sort=>sort_up ).
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F_COLUMN_TEXT
+*&---------------------------------------------------------------------*
+FORM f_column_text  USING    VALUE(p_field)
+                             VALUE(p_text)
+                             p_columns TYPE REF TO cl_salv_columns_table
+                             p_index   TYPE i
+                    CHANGING p_column  TYPE REF TO cl_salv_column_table.
+*----------------------------------------------------------------------*
+* Class
+*----------------------------------------------------------------------*
+  DATA: ol_color TYPE lvc_s_colo.
+
+*----------------------------------------------------------------------*
+* Variable
+*----------------------------------------------------------------------*
+  DATA: lv_long_text   TYPE scrtext_l,
+        lv_medium_text TYPE scrtext_m,
+        lv_short_text  TYPE scrtext_s.
+
+
+  lv_long_text   = p_text.
+  lv_medium_text = p_text.
+  lv_short_text  = p_text.
+  p_column ?= p_columns->get_column( p_field ).
+
+  IF p_text IS NOT INITIAL.
+    p_column->set_long_text( lv_long_text ).
+    p_column->set_medium_text( lv_medium_text ).
+    p_column->set_short_text( lv_short_text ).
+  ENDIF.
+
+  CASE p_index.
+    WHEN 1.
+      ol_color-col = '5'.
+      ol_color-int = '0'.
+      ol_color-inv = '0'.
+    WHEN 2.
+      ol_color-col = '4'.
+      ol_color-int = '1'.
+      ol_color-inv = '0'.
+    WHEN 3.
+      ol_color-col = '5'.
+      ol_color-int = '1'.
+      ol_color-inv = '1'.
+  ENDCASE.
+
+  p_column->set_color( ol_color ).
+
+ENDFORM.
